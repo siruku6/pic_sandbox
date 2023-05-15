@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Special Effects</title>
+    <script>
+      /* -----------------------------------------------------------------
+        README:
+          [1. 起動方法]
+            本ファイルをダブルクリックするか、
+            又はGoogle Chromeブラウザへとドラッグ&ドロップして下さい。
+
+          [2. 使用方法]
+            「ファイルを選択」ボタンをクリックし、
+            画像処理に欠けたい画像を選択してください。
+
+            その後、「Add lightness(+50)」と書かれたメニューを切り替えることで、
+            様々な画像処理を試すことができます。
+
+      ----------------------------------------------------------------- */
+      window.onload = function() {
+        var canvas1 = document.getElementById("canvas1");
+        var canvas2 = document.getElementById("canvas2");
+        var context1 = canvas1.getContext("2d");
+        var context2 = canvas2.getContext("2d");
+        var image = new Image();
+        var width, height;
+
+        var file = document.getElementById("file");
+        var menu = document.getElementById("menu");
+
+        setImage();
+
+        function setImage() {
+          var fileList = file.files;
+          if (fileList.length > 0) {
+            // ファイルのオブジェクトURL(ファイルの内容を表す変数)を作成
+            image.src = window.URL.createObjectURL(fileList[0]);
+          }
+        }
+        file.onchange = setImage; // ファイル選択時にsetImageを再実行
+
+        image.onload = function() {
+          width = image.width;
+          height = image.height;
+          canvas1.width = width;
+          canvas1.height = height;
+          canvas2.width = width;
+          canvas2.height = height;
+          context1.drawImage(image, 0, 0);
+          window.URL.revokeObjectURL(image.src); // 作ったURLを削除しておく
+          special();
+        };
+        menu.onchange = special; // メニュー切り替え時にspecialを再実行
+
+
+        function special() {
+          // 各画素値を取得
+          var imageData = context1.getImageData(0, 0, width, height);
+          var pixel = imageData.data;
+
+          // 結果保存用の変数
+          // Uint8ClampedArray値の範囲を制限(0~255)して配列を初期化する
+          var result = new Uint8ClampedArray(pixel.length);
+          var length = 4 * width * height;
+
+
+          switch (menu.selectedIndex) {
+          // Change brightness
+          case 0:
+          case 1:
+            var brightnessVariation = parseInt(
+              menu.options[menu.selectedIndex].value
+            );
+            for (var i = 0; i < length; i += 4) {
+              result[i] = pixel[i] + brightnessVariation;
+              result[i+1] = pixel[i+1] + brightnessVariation;
+              result[i+2] = pixel[i+2] + brightnessVariation;
+              result[i+3] = pixel[i+3];
+            }
+            break;
+
+          // Reverse brightness
+          case 2:
+            for (var i = 0; i < length; i += 4) {
+              result[i] = 255 - pixel[i];
+              result[i+1] = 255 - pixel[i+1];
+              result[i+2] = 255 - pixel[i+2];
+              result[i+3] = pixel[i+3];
+            }
+            break;
+
+          // posterization
+          case 3:
+            for (var i = 0; i < length; i += 4) {
+              result[i] = Math.floor(pixel[i] / 64) * 85;
+              result[i+1] = Math.floor(pixel[i+1] / 64) * 85;
+              result[i+2] = Math.floor(pixel[i+2] / 64) * 85;
+              result[i+3] = pixel[i+3];
+            }
+            break;
+
+          // Preparation for filter
+          case 4:
+          case 5:
+          case 6:
+          case 7:
+            // filterは、周囲の画素が必要なので、最も外側の画素値にはかけられない
+            // -> y = 1 から始まり、 height - 1 で終わる
+            for (var y = 1; y < height - 1; y++) {
+              for (var x = 1; x < width - 1; x++) {
+                var i = (x + y * width) * 4;
+                var j = new Uint32Array(9);
+                j[0] = (x - 1 + (y - 1) * width) * 4;
+                j[1] = (x     + (y - 1) * width) * 4;
+                j[2] = (x + 1 + (y - 1) * width) * 4;
+                j[3] = (x - 1 + (y    ) * width) * 4;
+                j[4] = i;
+                j[5] = (x + 1 + (y    ) * width) * 4;
+                j[6] = (x - 1 + (y + 1) * width) * 4;
+                j[7] = (x     + (y + 1) * width) * 4;
+                j[8] = (x + 1 + (y + 1) * width) * 4;
+
+                switch(menu.selectedIndex) {
+                case 4: // Weighted Averaging Filter
+                  var weight = new Int8Array([1, 2, 1, 2, 4, 2, 1, 2, 1]);
+                  result[i]     = mad(weight, j, 0) / 16;
+                  result[i + 1] = mad(weight, j, 1) / 16;
+                  result[i + 2] = mad(weight, j, 2) / 16;
+                  result[i + 3] = pixel[i + 3];
+                  break;
+                case 5: // Laplacian Filter
+                  var weight = new Int8Array([0, 1, 0, 1, -4, 1, 0, 1, 0]);
+                  result[i]     = Math.abs(mad(weight, j, 0));
+                  result[i + 1] = Math.abs(mad(weight, j, 1));
+                  result[i + 2] = Math.abs(mad(weight, j, 2));
+                  result[i + 3] = pixel[i + 3];
+                  break;
+                case 6: // Embossing
+                  var weight = new Int8Array([1, 0, 0, 0, 0, 0, 0, 0, -1]);
+                  result[i]     = mad(weight, j, 0) + 127;
+                  result[i + 1] = mad(weight, j, 1) + 127;
+                  result[i + 2] = mad(weight, j, 2) + 127;
+                  result[i + 3] = pixel[i + 3];
+                  break;
+                case 7: // Sharpening Filter
+                  var weight = new Int8Array([-1, -1, -1, -1, 9, -1, -1, -1, -1]);
+                  result[i]     = Math.abs(mad(weight, j, 0));
+                  result[i + 1] = Math.abs(mad(weight, j, 1));
+                  result[i + 2] = Math.abs(mad(weight, j, 2));
+                  result[i + 3] = pixel[i + 3];
+                  break;
+                }
+              }
+            }
+            break;
+          default: // gray scale化
+            for (var i = 0; i < length; i += 4) {
+              var gray = 0.299 * pixel[i] + 0.587 * pixel[i + 1] + 0.114 * pixel[i + 2];
+              result[i]     = gray;
+              result[i + 1] = gray;
+              result[i + 2] = gray;
+              result[i + 3] = pixel[i + 3];
+            }
+            break;
+          }
+
+          // 処理結果の格納
+          imageData.data.set(result);
+
+          // canvas contextに表示
+          context2.putImageData(imageData, 0, 0);
+
+          // 積和演算
+          function mad(weight, j, rgb_type) {
+            var s = weight[0] * pixel[j[0] + rgb_type] + weight[1] * pixel[j[1] + rgb_type]
+                  + weight[2] * pixel[j[2] + rgb_type] + weight[3] * pixel[j[3] + rgb_type]
+                  + weight[4] * pixel[j[4] + rgb_type] + weight[5] * pixel[j[5] + rgb_type]
+                  + weight[6] * pixel[j[6] + rgb_type] + weight[7] * pixel[j[7] + rgb_type]
+                  + weight[8] * pixel[j[8] + rgb_type];
+            return s;
+          }
+        };
+      };
+    </script>
+  </head>
+
+  <body>
+    <form>
+      <input type="file" id="file">
+      <select id="menu">
+        <option value="50">Add lightness(+50)</option>
+        <option value="-50">Decrease lightness(-50)</option>
+        <option value="0">Reverse lightness</option>
+        <option value="0">Posterization</option>
+        <option value="0">Weighted Averaging Filter</option>
+        <option value="0">Laplacian Filter</option>
+        <option value="0">Embossing</option>
+        <option value="0">Sharpening Filter</option>
+        <option value="0">Gray Scale</option>
+      </select>
+    </form>
+
+    <h3>処理前</h3>
+    <canvas id="canvas1"></canvas>
+
+    <h3>処理後</h3>
+    <canvas id="canvas2"></canvas>
+  </body>
+</html>
